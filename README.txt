@@ -1,3 +1,5 @@
+# Planned project layout (WIP)
+
 pico-anemometer/
 ├── .env                # Stores secrets for local development (NOT for git)
 ├── .gitignore          # Tells git which files to ignore
