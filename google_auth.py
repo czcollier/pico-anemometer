@@ -41,19 +41,19 @@ def get_gcp_access_token():
     time_synced = False
     for i in range(5): # Try up to 5 times
         try:
-            print(f"Syncing time with NTP server (Attempt {i+1}/5)...")
+            print(f"syncing time with NTP server (Attempt {i+1}/5)...")
             ntptime.settime()
             time_synced = True
             # **DEBUGGING STEP**: Print the time after sync to verify it's correct (in UTC).
             synced_time = time.localtime()
-            print(f"Time synced successfully. Current UTC time: {synced_time[0]}-{synced_time[1]:02d}-{synced_time[2]:02d} {synced_time[3]:02d}:{synced_time[4]:02d}:{synced_time[5]:02d}")
+            print(f"time synced successfully. Current UTC time: {synced_time[0]}-{synced_time[1]:02d}-{synced_time[2]:02d} {synced_time[3]:02d}:{synced_time[4]:02d}:{synced_time[5]:02d}")
             break # Exit the loop on success
         except Exception as e:
-            print(f"Warning: NTP sync attempt failed. {e}")
+            print(f"warning: NTP sync attempt failed. {e}")
             time.sleep(2) # Wait 2 seconds before retrying
 
     if not time_synced:
-        print("Error: Could not sync time with NTP after multiple attempts.")
+        print("error: Could not sync time with NTP after multiple attempts.")
         print("Cannot proceed without accurate time.")
         return None
 
@@ -75,12 +75,12 @@ def get_gcp_access_token():
         "scope": secrets.GCP_SCOPE
     }
     
-    print("\nJWT Payload (Claims):")
-    print(ujson.dumps(payload))
+    #print("\nJWT Payload (Claims):")
+    #print(ujson.dumps(payload))
 
     # 3. Manually create and sign the JWT
     try:
-        print("\nManually creating JWT...")
+        print("creating JWT...")
         
         # Encode header and payload as JSON, then Base64 URL-safe encode them
         encoded_header = b64url_encode(ujson.dumps(header).encode('utf-8'))
@@ -89,7 +89,7 @@ def get_gcp_access_token():
         # Create the signing input string (header.payload)
         signing_input = encoded_header + b'.' + encoded_payload
         
-        print("Loading private key from components...")
+        #print("Loading private key from components...")
         private_key = rsa.PrivateKey(
             secrets.GCP_PK_N,
             secrets.GCP_PK_E,
@@ -98,7 +98,7 @@ def get_gcp_access_token():
             secrets.GCP_PK_Q
         )
         
-        print("Signing JWT with RS256...")
+        #print("Signing JWT with RS256...")
         signature = rsa.sign(signing_input, private_key, 'SHA-256')
         
         # Base64 URL-safe encode the signature
@@ -114,7 +114,7 @@ def get_gcp_access_token():
 
     # 4. Exchange the signed JWT for an access token
     try:
-        print(f"\nRequesting access token from: {secrets.GCP_TOKEN_URI}")
+        print("requesting access token")
         headers = {"Content-Type": "application/x-www-form-urlencoded"}
         
         # The body must be URL-encoded
@@ -130,17 +130,17 @@ def get_gcp_access_token():
         response_json = response.json()
         response.close()
 
-        print(f"Received response with status code: {status_code}")
+        #print(f"Received response with status code: {status_code}")
         
         if status_code == 200:
             access_token = response_json.get("access_token")
-            print("\nSuccessfully obtained GCP Access Token!")
+            print("successfully obtained access token!")
             return access_token
         else:
-            print("Error: Failed to get access token.")
-            print("Response:", ujson.dumps(response_json))
+            print("error: failed to get access token.")
+            print("response:", ujson.dumps(response_json))
             return None
             
     except Exception as e:
-        print(f"Error: An exception occurred during the POST request. {e}")
+        print(f"error: An exception occurred during the POST request. {e}")
         return None
