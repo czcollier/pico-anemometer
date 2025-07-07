@@ -16,6 +16,7 @@ JWT_ALG = 'RS256'
 # JWTs are valid for a maximum of 1 hour (3600 seconds)
 JWT_EXP_DELTA_SECONDS = 3600
 
+NTP_RETRIES = 15
 
 # --- Helper Function ---
 def b64url_encode(data):
@@ -39,12 +40,11 @@ def get_gcp_access_token():
     
     # 1. Sync time with NTP server. This is CRITICAL for JWT 'iat' and 'exp' claims.
     time_synced = False
-    for i in range(5): # Try up to 5 times
+    for i in range(NTP_RETRIES): # Try up to 5 times
         try:
             print(f"syncing time with NTP server (Attempt {i+1}/5)...")
             ntptime.settime()
             time_synced = True
-            # **DEBUGGING STEP**: Print the time after sync to verify it's correct (in UTC).
             synced_time = time.localtime()
             print(f"time synced successfully. Current UTC time: {synced_time[0]}-{synced_time[1]:02d}-{synced_time[2]:02d} {synced_time[3]:02d}:{synced_time[4]:02d}:{synced_time[5]:02d}")
             break # Exit the loop on success
