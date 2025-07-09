@@ -3,6 +3,8 @@ import ujson
 import urequests
 import ntptime
 import ubinascii
+import uhashlib
+import fastrsa
 # Custom libraries placed in /lib
 # The microjwt library is no longer needed.
 import rsa
@@ -89,17 +91,31 @@ def get_gcp_access_token():
         # Create the signing input string (header.payload)
         signing_input = encoded_header + b'.' + encoded_payload
         
-        #print("Loading private key from components...")
-        private_key = rsa.PrivateKey(
-            secrets.GCP_PK_N,
-            secrets.GCP_PK_E,
-            secrets.GCP_PK_D,
-            secrets.GCP_PK_P,
-            secrets.GCP_PK_Q
-        )
-        
+        print("Loading private key components...")
+        try:
+            n_bytes = ubinascii.unhexlify(secrets.RSA_N_HEX)
+            d_bytes = ubinascii.unhexlify(secrets.RSA_D_HEX)
+        except (AttributeError, NameError):
+            print("ERROR: RSA_N_HEX and/or RSA_D_HEX not found in your secrets.py file.")
+            print("Please run the key_extractor.py script on your desktop to generate them.")
+            return None 
         #print("Signing JWT with RS256...")
-        signature = rsa.sign(signing_input, private_key, 'SHA-256')
+
+        # 5. Hash the message with SHA-256
+        # The PKCS#1 v1.5 padding requires the message to be hashed first.
+        h = uhashlib.sha256()
+        h.update(signing_input)
+        hashed_message = h.digest()
+        # 6. Sign the HASHED message using the C module
+        print("Signing JWT with fastrsa C module...")
+        start_time = time.ticks_ms()
+        
+        # This is the call to your high-speed C function!
+        signature = fastrsa.sign(hashed_message, n_bytes, d_bytes)
+        
+        end_time = time.ticks_ms()
+        print(f"C signing took {time.ticks_diff(end_time, start_time)} ms")
+        #signature = rsa.sign(signing_input, private_key, 'SHA-256')
         
         # Base64 URL-safe encode the signature
         encoded_signature = b64url_encode(signature)
