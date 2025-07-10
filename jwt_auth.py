@@ -1,13 +1,10 @@
 import time
 import ujson
 import urequests
-import ntptime
 import ubinascii
-# Custom libraries placed in /lib
-# The microjwt library is no longer needed.
-import rsa
-
-# Your credentials stored in a separate file
+# custom micropython fast RSA module
+import fastrsa
+# credentials
 import secrets
 
 # --- Constants ---
@@ -16,10 +13,9 @@ JWT_ALG = 'RS256'
 # JWTs are valid for a maximum of 1 hour (3600 seconds)
 JWT_EXP_DELTA_SECONDS = 3600
 
-NTP_RETRIES = 30 
 
 # --- Helper Function ---
-def b64url_encode(data):
+def _b64url_encode(data):
     """
     Helper function to perform Base64 URL-safe encoding.
     This replaces '+' with '-' and '/' with '_' and removes padding.
@@ -29,7 +25,7 @@ def b64url_encode(data):
 
 
 # --- Main Authentication Logic ---
-def get_gcp_access_token():
+def get_jwt_access_token():
     """
     Creates a signed JWT and exchanges it for a GCP access token.
     
@@ -37,25 +33,6 @@ def get_gcp_access_token():
         The access token string if successful, otherwise None.
     """
     print("\n--- Starting GCP Authentication ---")
-    
-    # 1. Sync time with NTP server. This is CRITICAL for JWT 'iat' and 'exp' claims.
-    time_synced = False
-    for i in range(NTP_RETRIES): # Try up to 5 times
-        try:
-            print(f"syncing time with NTP server (Attempt {i+1}/{NTP_RETRIES})...")
-            ntptime.settime()
-            time_synced = True
-            synced_time = time.localtime()
-            print(f"time synced successfully. Current UTC time: {synced_time[0]}-{synced_time[1]:02d}-{synced_time[2]:02d} {synced_time[3]:02d}:{synced_time[4]:02d}:{synced_time[5]:02d}")
-            break # Exit the loop on success
-        except Exception as e:
-            print(f"warning: NTP sync attempt failed. {e}")
-            time.sleep(2) # Wait 2 seconds before retrying
-
-    if not time_synced:
-        print("error: Could not sync time with NTP after multiple attempts.")
-        print("Cannot proceed without accurate time.")
-        return None
 
     # 2. Define the JWT Header and Payload (Claims)
     header = {
@@ -63,7 +40,7 @@ def get_gcp_access_token():
         "typ": "JWT"
     }
 
-    # Get current time as a Unix timestamp (seconds since 1970)
+    # current time as a Unix timestamp 
     current_unix_time = time.time()
     
     payload = {
@@ -74,36 +51,45 @@ def get_gcp_access_token():
         "exp": current_unix_time + JWT_EXP_DELTA_SECONDS,
         "scope": secrets.GCP_SCOPE
     }
-    
-    #print("\nJWT Payload (Claims):")
-    #print(ujson.dumps(payload))
 
-    # 3. Manually create and sign the JWT
+    # create and sign the JWT
     try:
         print("creating JWT...")
-        
+
+        print("encoding header and payload...") 
         # Encode header and payload as JSON, then Base64 URL-safe encode them
-        encoded_header = b64url_encode(ujson.dumps(header).encode('utf-8'))
-        encoded_payload = b64url_encode(ujson.dumps(payload).encode('utf-8'))
+        encoded_header = _b64url_encode(ujson.dumps(header).encode('utf-8'))
+        encoded_payload = _b64url_encode(ujson.dumps(payload).encode('utf-8'))
         
+        print("building signing input...") 
         # Create the signing input string (header.payload)
         signing_input = encoded_header + b'.' + encoded_payload
-        
-        #print("Loading private key from components...")
-        private_key = rsa.PrivateKey(
-            secrets.GCP_PK_N,
-            secrets.GCP_PK_E,
-            secrets.GCP_PK_D,
-            secrets.GCP_PK_P,
-            secrets.GCP_PK_Q
+   
+        print("preparing key bytes...")        
+        n_bytes = ubinascii.unhexlify(secrets.RSA_N_HEX)
+        e_bytes = ubinascii.unhexlify(secrets.RSA_E_HEX)
+        d_bytes = ubinascii.unhexlify(secrets.RSA_D_HEX)
+        p_bytes = ubinascii.unhexlify(secrets.RSA_P_HEX)
+        q_bytes = ubinascii.unhexlify(secrets.RSA_Q_HEX)
+  
+        print("signing...") 
+        signature = fastrsa.sign(
+            signing_input,
+            n_bytes,
+            e_bytes,
+            d_bytes,
+            p_bytes,
+            q_bytes
         )
         
         #print("Signing JWT with RS256...")
-        signature = rsa.sign(signing_input, private_key, 'SHA-256')
+        #signature = rsa.sign(signing_input, private_key, 'SHA-256')
         
+        print("encoding signature...") 
         # Base64 URL-safe encode the signature
-        encoded_signature = b64url_encode(signature)
-        
+        encoded_signature = _b64url_encode(signature)
+         
+        print("creating signed jwt...") 
         # Concatenate to form the final JWT string
         signed_jwt = signing_input.decode('utf-8') + '.' + encoded_signature.decode('utf-8')
         print("JWT created and signed successfully.")

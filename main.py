@@ -3,33 +3,40 @@ import machine
 import math
 from frequency_counter import FrequencyCounter
 from moving_average import MovingAverage
-import google_auth
+import jwt_auth
+import ntp
 import czc_wifi
 import secrets
 import urequests
 import _thread
 
-from machine import ADC
-
 # --- Configuration ---
 # sensor
-SENSOR_PIN = 15
-SENSOR_DEBUG_MODE = False
-SAMPLING_INTERVAL = 20 
-SMOOTHING_WINDOW_LEN_MS = 1200
-FREQUENCY_COUNTER_TIMEOUT = 5000
-READING_TOLERANCE = 0.05
-SMOOTHING_WINDOW_SIZE = int(SMOOTHING_WINDOW_LEN_MS / SAMPLING_INTERVAL)
+SENSOR_PIN: int = 15
+SENSOR_DEBUG_MODE: bool = False
+SAMPLING_INTERVAL: int = 20 
+SMOOTHING_WINDOW_LEN_MS: int = 1200
+FREQUENCY_COUNTER_TIMEOUT: int = 5000
+READING_TOLERANCE: float = 0.05
+SMOOTHING_WINDOW_SIZE: int = int(SMOOTHING_WINDOW_LEN_MS / SAMPLING_INTERVAL)
 
 # data upload
-REPORTING_INTERVAL_MS = 1 * 1000
-FBASE_URL_FMT = "https://{db_name}.firebaseio.com/{path}?access_token={access_token}"
-WIFI_CONNECT_SLEEP_S = 10
+REPORTING_INTERVAL_MS: int = 1 * 1000
+FBASE_URL_FMT: str = "https://{db_name}.firebaseio.com/{path}?access_token={access_token}"
+WIFI_CONNECT_SLEEP_S: int = 10
 
 # auth
-AUTH_TOKEN_EXPIRY_MS = 1000 * 3600
-AUTH_REFRESH_INTERVAL_MS = int(AUTH_TOKEN_EXPIRY_MS * 0.9)
+AUTH_TOKEN_EXPIRY_MS: int = 1000 * 3600
+AUTH_REFRESH_INTERVAL_MS: int = int(AUTH_TOKEN_EXPIRY_MS * 0.9)
+NTP_RETRIES: int = 15
+NTP_FAILURE_LENIENT: bool = False
 
+
+# Global data shared between cores
+sensor_loop_may_proceed: bool = True
+latest_smoothed_frequency: float = 0.0
+# lock for latest_smoothed_frequency
+data_lock = _thread.allocate_lock()
 
 
 # The sensor reading loop
@@ -47,9 +54,6 @@ def sensor_loop() -> None:
         timeout_ms=FREQUENCY_COUNTER_TIMEOUT)
     
     smoother = MovingAverage(SMOOTHING_WINDOW_SIZE)
-    
-    sensor_debug_interval_ms = 500 
-    last_sensor_debug = 0
 
     try:
         print("sensor core: Starting sensor reading loop.")
@@ -71,17 +75,35 @@ def sensor_loop() -> None:
         _thread.exit()
 
 
-def connect_to_wifi():
+def connect_to_wifi() -> None:
     czc_wifi.connect_wifi(secrets.WIFI_SSID, secrets.WIFI_PASS)
 
 
-def get_formatted_time():
+def get_formatted_time() -> str:
     synced_time = time.localtime()
     return (f"{synced_time[0]}-{synced_time[1]:02d}-{synced_time[2]:02d}"
           f" {synced_time[3]:02d}:{synced_time[4]:02d}:{synced_time[5]:02d}")
 
 
-def send_to_firebase(frequency_hz: float, timestamp: str, db_name: str, path: str, access_token: str) -> None:
+def google_jwt_authenticate(ntp_failure_lenient: bool=False):
+    time_synced = ntp.sync_clock_to_ntp()
+
+    if not time_synced:
+        print("error: Could not sync time with NTP after multiple attempts.")
+        if not ntp_failure_lenient:
+            print("Cannot proceed without accurate time.")
+            return None
+        else:
+            print("continuing without syncing time to ntp and hoping for the best")
+
+    return jwt_auth.get_jwt_access_token()
+
+
+def send_to_firebase(
+        frequency_hz: float,
+        timestamp: str,
+        db_name: str, path: str,
+        access_token: str) -> None:
     try:
         freq_rounded = round(frequency_hz, 2)
         data_to_send = {
@@ -103,16 +125,9 @@ def send_to_firebase(frequency_hz: float, timestamp: str, db_name: str, path: st
     except Exception as e:
         print(f"error sending to Firebase: {e}")
 
-# Global data shared between cores
-sensor_loop_may_proceed = True
-latest_smoothed_frequency: float = 0.0
-# lock for latest_smoothed_frequency
-data_lock = _thread.allocate_lock()
 
-in_auth = False
-
-# main core: network, firebase, etc
-if __name__ == "__main__":
+def main_loop() -> None:
+    global sensor_loop_may_proceed
     try:
         # --- Start the sensor loop on the second core ---
         _thread.start_new_thread(sensor_loop, ())
@@ -120,7 +135,7 @@ if __name__ == "__main__":
         # --- Connect to Wi-Fi on the main core ---
         connect_to_wifi()
 
-        gcp_access_token = google_auth.get_gcp_access_token()
+        gcp_access_token = google_jwt_authenticate(NTP_FAILURE_LENIENT)
         start_ms = time.ticks_ms()
         last_auth_refresh_time = start_ms
         last_report_time = start_ms - REPORTING_INTERVAL_MS
@@ -131,20 +146,18 @@ if __name__ == "__main__":
         # --- main loop for main core ---
         while True:
             curr_ms = time.ticks_ms()
-            # 1. CONNECTION WATCHDOG: Check if we are still connected.
+            # CONNECTION WATCHDOG: Check if we are still connected.
             if not czc_wifi.is_wifi_connected():
-                print("Core 0: Wi-Fi connection lost. Attempting to reconnect...")
-                # Call your existing connect_to_wifi() function
+                print("main core: Wi-Fi connection lost. Attempting to reconnect...")
                 connect_to_wifi() 
-                # If it fails, sleep for a bit and let the loop try again
                 time.sleep(WIFI_CONNECT_SLEEP_S)
-                continue # Skip the rest of this loop iteration
+                continue # skip the rest of this loop iteration
 
             auth_ttl = int((AUTH_REFRESH_INTERVAL_MS
                 - time.ticks_diff(curr_ms, last_auth_refresh_time)) / 1000)
 
             if  auth_ttl <= 0:
-                access_token = google_auth.get_gcp_access_token()
+                gcp_access_token = google_jwt_authenticate(NTP_FAILURE_LENIENT)
                 last_auth_refresh_time = curr_ms
             
             if time.ticks_diff(curr_ms, last_report_time) >= REPORTING_INTERVAL_MS:
@@ -175,3 +188,7 @@ if __name__ == "__main__":
     finally:
         print("turning off sensor loop")
         sensor_loop_may_proceed = False
+
+
+if __name__ == "__main__":
+    main_loop()

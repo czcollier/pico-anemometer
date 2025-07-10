@@ -4,6 +4,10 @@
 import time
 import math
 import random
+import sinewave_generator
+
+swg = sinewave_generator.SinewaveGenerator(1, 0, 1000)
+mock_data = sinewave_generator.SinewaveGenerator(5, 0, 1000)
 
 # --- Mock Pin Class ---
 # Needed so that `machine.Pin()` doesn't cause an error.
@@ -16,7 +20,9 @@ class Pin:
         print(f"MockPin: Pin {id} initialized.")
     def value(self, val=None):
         # Return a dummy value if called.
-        return 0
+        freq = mock_data.generate_sine_wave_point(0.3)
+        sw_value = swg.generate_sine_wave_point(freq)
+        return 0 if sw_value < 0 else 1
 
 # --- Mock ADC Class ---
 class ADC:
