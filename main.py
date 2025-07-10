@@ -22,14 +22,14 @@ SMOOTHING_WINDOW_SIZE: int = int(SMOOTHING_WINDOW_LEN_MS / SAMPLING_INTERVAL)
 
 # data upload
 REPORTING_INTERVAL_MS: int = 1 * 1000
-FBASE_URL_FMT: str = "https://{db_name}.firebaseio.com/{path}?access_token={access_token}"
+FIREBASE_URL_FMT: str = "https://{db_name}.firebaseio.com/{path}"
 WIFI_CONNECT_SLEEP_S: int = 10
 
 # auth
 AUTH_TOKEN_EXPIRY_MS: int = 1000 * 3600
 AUTH_REFRESH_INTERVAL_MS: int = int(AUTH_TOKEN_EXPIRY_MS * 0.9)
-NTP_RETRIES: int = 15
-NTP_FAILURE_LENIENT: bool = False
+NTP_RETRIES: int = 1
+NTP_FAILURE_LENIENT: bool = True
 
 
 # Global data shared between cores
@@ -37,6 +37,13 @@ sensor_loop_may_proceed: bool = True
 latest_smoothed_frequency: float = 0.0
 # lock for latest_smoothed_frequency
 data_lock = _thread.allocate_lock()
+
+
+def get_google_auth_headers(access_token: str):
+  return {
+    "Content-Type": "application/json",
+    "authorization": f"Bearer {access_token}"
+  }
 
 
 # The sensor reading loop
@@ -58,9 +65,9 @@ def sensor_loop() -> None:
     try:
         print("sensor core: Starting sensor reading loop.")
         while sensor_loop_may_proceed:
-            current_time: int = time.ticks_ms()
+            current_tick: int = time.ticks_ms()
             sensor_value: int = sensor_pin.value()
-            frequency_counter.update(current_time, sensor_value)
+            frequency_counter.update(current_tick, sensor_value)
             current_frequency: float = frequency_counter.get_frequency()
             smoother.add_value(current_frequency)
             
@@ -113,12 +120,11 @@ def send_to_firebase(
 
         print(f"sending to Firebase: {data_to_send}")
 
-        fbase_url = FBASE_URL_FMT.format(
-            access_token=access_token,
-            db_name=db_name, path=path)
-
+        fbase_url = FIREBASE_URL_FMT.format(db_name=db_name, path=path)
+        fbase_headers = get_google_auth_headers(access_token)
         response = urequests.patch(
             url=fbase_url,
+            headers=fbase_headers,
             json=data_to_send)
         print(f"firebase response: {response.status_code}\n{response.text}")
         response.close()

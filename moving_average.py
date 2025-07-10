@@ -1,5 +1,3 @@
-import time
-
 class MovingAverage:
   """
   Calculates a simple moving average over a fixed-size window of values.
