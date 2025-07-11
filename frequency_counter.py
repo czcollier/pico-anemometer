@@ -1,17 +1,22 @@
-from utime import sleep
+import micropython
 
+@micropython.native
 class FrequencyCounter:
-  def __init__(self, high_threshold, low_threshold, timeout_ms):
-    self._high_threshold = high_threshold
-    self._low_threshold = low_threshold
-    self._timeout_ms = timeout_ms
+  def __init__(
+      self,
+      high_threshold: float,
+      low_threshold: float,
+      timeout_ms: int):
+    self._high_threshold: float = high_threshold
+    self._low_threshold: float = low_threshold
+    self._timeout_ms: int = timeout_ms
 
-    self._is_armed = False
-    self._has_started = False
-    self._current_frequency = 0.0
-    self._last_event_time = 0
+    self._is_armed: bool = False
+    self._has_started: bool = False
+    self._current_frequency: float = 0.0
+    self._last_event_time: int = 0
   
-  def update(self, current_ms, sensor_value):
+  def update(self, current_ms: int, sensor_value: int) -> None:
     if sensor_value < self._low_threshold:
       self._is_armed = True
 
@@ -32,7 +37,7 @@ class FrequencyCounter:
       self._has_started = False
 
 
-  def get_frequency(self):
+  def get_frequency(self) -> float:
     return self._current_frequency
 
   

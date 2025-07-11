@@ -9,26 +9,29 @@ import czc_wifi
 import secrets
 import urequests
 import _thread
+from micropython import const
 
 # --- Configuration ---
 # sensor
-SENSOR_PIN: int = 15
-SENSOR_DEBUG_MODE: bool = False
-SAMPLING_INTERVAL: int = 20 
-SMOOTHING_WINDOW_LEN_MS: int = 1200
-FREQUENCY_COUNTER_TIMEOUT: int = 5000
 READING_TOLERANCE: float = 0.05
-SMOOTHING_WINDOW_SIZE: int = int(SMOOTHING_WINDOW_LEN_MS / SAMPLING_INTERVAL)
+SENSOR_DEBUG_MODE: bool = False
+
+SENSOR_PIN: int = const(15)
+SAMPLING_INTERVAL: int = const(20)
+SMOOTHING_WINDOW_LEN_MS: int = const(1200)
+FREQUENCY_COUNTER_TIMEOUT: int = const(5000)
+SMOOTHING_WINDOW_SIZE: int = const(
+    int(SMOOTHING_WINDOW_LEN_MS / SAMPLING_INTERVAL))
 
 # data upload
-REPORTING_INTERVAL_MS: int = 1 * 1000
+REPORTING_INTERVAL_MS: int = const(1 * 1000)
 FIREBASE_URL_FMT: str = "https://{db_name}.firebaseio.com/{path}"
-WIFI_CONNECT_SLEEP_S: int = 10
+WIFI_CONNECT_SLEEP_S: int = const(10)
 
 # auth
-AUTH_TOKEN_EXPIRY_MS: int = 1000 * 3600
-AUTH_REFRESH_INTERVAL_MS: int = int(AUTH_TOKEN_EXPIRY_MS * 0.9)
-NTP_RETRIES: int = 1
+AUTH_TOKEN_EXPIRY_MS: int = const(1000 * 3600)
+AUTH_REFRESH_INTERVAL_MS: int = const(int(AUTH_TOKEN_EXPIRY_MS * 0.9))
+NTP_RETRIES: int = const(1)
 NTP_FAILURE_LENIENT: bool = True
 
 
@@ -70,7 +73,7 @@ def sensor_loop() -> None:
             frequency_counter.update(current_tick, sensor_value)
             current_frequency: float = frequency_counter.get_frequency()
             smoother.add_value(current_frequency)
-            
+
             # --- safely update the shared variable ---
             with data_lock:
                 latest_smoothed_frequency = smoother.get_average()
@@ -118,7 +121,7 @@ def send_to_firebase(
             "timestamp": timestamp
         }
 
-        print(f"sending to Firebase: {data_to_send}")
+        print("sending to Firebase: ", data_to_send)
 
         fbase_url = FIREBASE_URL_FMT.format(db_name=db_name, path=path)
         fbase_headers = get_google_auth_headers(access_token)
@@ -126,10 +129,10 @@ def send_to_firebase(
             url=fbase_url,
             headers=fbase_headers,
             json=data_to_send)
-        print(f"firebase response: {response.status_code}\n{response.text}")
+        print("firebase response: ", response.status_code)
         response.close()
     except Exception as e:
-        print(f"error sending to Firebase: {e}")
+        print("error sending to Firebase: ", e)
 
 
 def main_loop() -> None:
@@ -170,9 +173,9 @@ def main_loop() -> None:
                 last_report_time = curr_ms
                 # safely read shared state
                 with data_lock:
-                    current_reading = abs(latest_smoothed_frequency)
+                    current_reading = round(abs(latest_smoothed_frequency), 2)
                 
-                print(f"reading: {current_reading:0.2f}, auth ttl: {auth_ttl}")
+                print("reading: ", current_reading, " auth ttl: ", auth_ttl)
                
                 # don't send values very similar to the last reading
                 if not math.isclose(current_reading, last_reading, abs_tol=READING_TOLERANCE):
@@ -186,11 +189,11 @@ def main_loop() -> None:
                             gcp_access_token) # type: ignore
                         last_reading = current_reading
                     except Exception as e:
-                        print(f"main core: failed to send data: {e}")
+                        print("main core: failed to send data: ", e)
 
             time.sleep_ms(100)
     except Exception as e:
-        print(f"error occurred in main loop: {e}")
+        print("error occurred in main loop: ", e)
     finally:
         print("turning off sensor loop")
         sensor_loop_may_proceed = False

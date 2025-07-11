@@ -1,3 +1,5 @@
+import array
+
 class MovingAverage:
   """
   Calculates a simple moving average over a fixed-size window of values.
@@ -12,9 +14,14 @@ class MovingAverage:
     """
     if window_size <= 0:
       raise ValueError("Window size must be a positive integer.")
-    self._size = window_size
+    self._size: int = window_size
     # In Python, a list is a much better fit than a raw array.
-    self._readings = [0.0] * self._size
+    self._readings = array.array(
+      'f', (0.0 for _ in range(window_size)))
+
+    self._current_index: int = 0
+    self._current_sum: float = 0.0
+    self._window_is_full: bool = False
     self.clear()
 
   def clear(self):
