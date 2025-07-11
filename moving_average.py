@@ -1,10 +1,12 @@
 import array
+import micropython
 
 class MovingAverage:
   """
   Calculates a simple moving average over a fixed-size window of values.
   This is useful for smoothing out noisy data.
   """
+  @micropython.native
   def __init__(self, window_size: int):
     """
     Initializes the SlidingWindowAverage.
@@ -24,6 +26,7 @@ class MovingAverage:
     self._window_is_full: bool = False
     self.clear()
 
+
   def clear(self):
     """Clears the history and resets the average."""
     self._current_index = 0
@@ -33,6 +36,8 @@ class MovingAverage:
     for i in range(self._size):
       self._readings[i] = 0.0
 
+
+  @micropython.native
   def add_value(self, new_value: float):
     """
     Adds a new value to the window, replacing the oldest value if the
@@ -56,6 +61,8 @@ class MovingAverage:
       self._current_index = 0
       self._window_is_full = True
 
+
+  @micropython.native
   def get_average(self) -> float:
     """
     Gets the current average of the values in the window.

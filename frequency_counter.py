@@ -1,6 +1,5 @@
 import micropython
 
-@micropython.native
 class FrequencyCounter:
   def __init__(
       self,
@@ -16,6 +15,7 @@ class FrequencyCounter:
     self._current_frequency: float = 0.0
     self._last_event_time: int = 0
   
+  @micropython.native
   def update(self, current_ms: int, sensor_value: int) -> None:
     if sensor_value < self._low_threshold:
       self._is_armed = True
@@ -36,7 +36,7 @@ class FrequencyCounter:
       self._current_frequency = 0.0
       self._has_started = False
 
-
+  @micropython.native
   def get_frequency(self) -> float:
     return self._current_frequency
 
