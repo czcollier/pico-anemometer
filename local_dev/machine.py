@@ -24,6 +24,12 @@ class Pin:
         sw_value = swg.generate_sine_wave_point(freq)
         return 0 if sw_value < 0 else 1
 
+    def on(self):
+        pass
+
+    def off(self):
+        pass
+
 # --- Mock ADC Class ---
 class ADC:
     """

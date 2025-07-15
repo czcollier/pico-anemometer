@@ -10,31 +10,35 @@ import secrets
 import urequests
 import _thread
 from micropython import const
+from timestamp import get_current_timestamp
+import pubsub
+import firebase
 
 # --- Configuration ---
 # sensor
-READING_TOLERANCE: float = 0.05
+READING_TOLERANCE: float = const(0.05)
 SENSOR_DEBUG_MODE: bool = False
 
 SENSOR_PIN: int = const(15)
 SAMPLING_INTERVAL: int = const(20)
-SMOOTHING_WINDOW_LEN_MS: int = const(1200)
+SMOOTHING_WINDOW_LEN_MS: int = const(8000)
 FREQUENCY_COUNTER_TIMEOUT: int = const(5000)
 SMOOTHING_WINDOW_SIZE: int = const(
     int(SMOOTHING_WINDOW_LEN_MS / SAMPLING_INTERVAL))
 
 # data upload
-REPORTING_INTERVAL_MS: int = const(1 * 1000)
-FIREBASE_URL_FMT: str = "https://{db_name}.firebaseio.com/{path}"
+REPORTING_INTERVAL_MS: int = const(8000)
 WIFI_CONNECT_SLEEP_S: int = const(10)
 TIMESTAMP_FORMAT = const("%d-%02d-%02d %02d:%02d:%02d")
+USE_PUBSUB = False
 
 # auth
 AUTH_TOKEN_EXPIRY_MS: int = const(1000 * 3600)
 AUTH_REFRESH_INTERVAL_MS: int = const(int(AUTH_TOKEN_EXPIRY_MS * 0.9))
-NTP_RETRIES: int = const(1)
-NTP_FAILURE_LENIENT: bool = True
-JWT_RETRIES = 20
+NTP_RETRIES: int = const(20)
+NTP_FAILURE_LENIENT: bool = False
+JWT_RETRIES = const(20)
+CLOCK_USES_LOCAL_TIME = True
 
 # Global data shared between cores
 sensor_loop_may_proceed: bool = True
@@ -42,20 +46,6 @@ latest_smoothed_frequency: float = 0.0
 # lock for latest_smoothed_frequency
 data_lock = _thread.allocate_lock()
 
-
-data_to_send = {
-    "wind_speed": 0,
-    "timestamp": "" 
-}
-
-google_auth_headers = {
-    "Content-Type": "application/json",
-    "authorization": ""
-}
-
-def get_google_auth_headers(access_token: str):
-  google_auth_headers["authorization"] = "Bearer " + access_token
-  return google_auth_headers
 
 # The sensor reading loop
 # This function will run continuously on the sensor core
@@ -98,7 +88,7 @@ def connect_to_wifi() -> None:
 
 
 def google_jwt_authenticate(ntp_failure_lenient: bool=False):
-    time_synced = ntp.sync_clock_to_ntp()
+    time_synced = ntp.sync_clock_to_ntp(NTP_RETRIES)
 
     if not time_synced:
         print("error: Could not sync time with NTP after multiple attempts.")
@@ -107,38 +97,14 @@ def google_jwt_authenticate(ntp_failure_lenient: bool=False):
             return None
         else:
             print("continuing without syncing time to ntp and hoping for the best")
-    jwt_access_token: str | None = None
+    jwt_auth_headers: dict | None = None
     jwt_try = 1
-    while jwt_access_token is None and jwt_try <= JWT_RETRIES:
+    while jwt_auth_headers is None and jwt_try <= JWT_RETRIES:
         print("attempting to get JWT access token")
         jwt_try += 1
-        jwt_access_token = jwt_auth.get_jwt_access_token()
+        jwt_auth_headers = jwt_auth.get_jwt_auth_headers()
 
-    return jwt_access_token
-
-
-def send_to_firebase(
-        frequency_hz: float,
-        timestamp: str,
-        db_name: str, path: str,
-        access_token: str) -> None:
-    try:
-        freq_rounded = round(frequency_hz, 2)
-        data_to_send["wind_speed"] = freq_rounded
-        data_to_send["timestamp"] = timestamp
-
-        print("sending to Firebase: ", data_to_send)
-
-        fbase_url = FIREBASE_URL_FMT.format(db_name=db_name, path=path)
-        fbase_headers = get_google_auth_headers(access_token)
-        response = urequests.patch(
-            url=fbase_url,
-            headers=fbase_headers,
-            json=data_to_send)
-        print("firebase response: ", response.status_code)
-        response.close()
-    except Exception as e:
-        print("error sending to Firebase: ", e)
+    return jwt_auth_headers
 
 
 def main_loop() -> None:
@@ -150,7 +116,8 @@ def main_loop() -> None:
         # --- Connect to Wi-Fi on the main core ---
         connect_to_wifi()
 
-        gcp_access_token = google_jwt_authenticate(NTP_FAILURE_LENIENT)
+        jwt_auth_headers = google_jwt_authenticate(NTP_FAILURE_LENIENT)
+
         start_ms = time.ticks_ms()
         last_auth_refresh_time = start_ms
         last_report_time = start_ms - REPORTING_INTERVAL_MS
@@ -161,45 +128,49 @@ def main_loop() -> None:
         # --- main loop for main core ---
         while True:
             curr_ms = time.ticks_ms()
-            # CONNECTION WATCHDOG: Check if we are still connected.
-            if not czc_wifi.is_wifi_connected():
-                print("main core: Wi-Fi connection lost. Attempting to reconnect...")
-                connect_to_wifi() 
-                time.sleep(WIFI_CONNECT_SLEEP_S)
-                continue # skip the rest of this loop iteration
-
-            auth_ttl = int((AUTH_REFRESH_INTERVAL_MS
-                - time.ticks_diff(curr_ms, last_auth_refresh_time)) / 1000)
-
-            if  auth_ttl <= 0:
-                gcp_access_token = google_jwt_authenticate(NTP_FAILURE_LENIENT)
-                last_auth_refresh_time = curr_ms
             
             if time.ticks_diff(curr_ms, last_report_time) >= REPORTING_INTERVAL_MS:
+                # CONNECTION WATCHDOG: Check if we are still connected.
+                if not czc_wifi.is_wifi_connected():
+                    print("main core: Wi-Fi connection lost. Attempting to reconnect...")
+                    connect_to_wifi() 
+                    time.sleep(WIFI_CONNECT_SLEEP_S)
+                    continue # skip the rest of this loop iteration
+
+                auth_ttl = int((AUTH_REFRESH_INTERVAL_MS
+                    - time.ticks_diff(curr_ms, last_auth_refresh_time)) / 1000)
+
+                if  auth_ttl <= 0:
+                    jwt_auth_headers = google_jwt_authenticate(NTP_FAILURE_LENIENT)
+                    last_auth_refresh_time = curr_ms
+                
                 last_report_time = curr_ms
                 # safely read shared state
                 with data_lock:
                     current_reading = round(abs(latest_smoothed_frequency), 2)
-                
+            
                 print("reading: ", current_reading, " auth ttl: ", auth_ttl)
                
                 # don't send values very similar to the last reading
                 if not math.isclose(current_reading, last_reading, abs_tol=READING_TOLERANCE):
-                    timestamp = TIMESTAMP_FORMAT % time.localtime()[0:6]
-                    try: 
-                        send_to_firebase(
+                    timestamp = get_current_timestamp() 
+                    try:
+                        led.on() 
+                        firebase.send_to_firebase(
                             current_reading,
                             timestamp,
-                            secrets.FIREBASE_DB_NAME,
-                            secrets.FIREBASE_DATA_PATH,
-                            gcp_access_token) # type: ignore
+                            jwt_auth_headers) # type: ignore
+                        if USE_PUBSUB:
+                            pubsub.publish(
+                                current_reading,
+                                timestamp,
+                                jwt_auth_headers)
+                        led.off()
                         last_reading = current_reading
                     except Exception as e:
                         print("main core: failed to send data: ", e)
 
-            led.on() 
             time.sleep_ms(100)
-            led.off()
 
     except Exception as e:
         print("error occurred in main loop: ", e)
