@@ -30,6 +30,13 @@ class Pin:
     def off(self):
         pass
 
+class PWM:
+    def freq(self, frequency):
+        pass
+
+    def duty_u16(self, duty):
+        pass
+
 # --- Mock ADC Class ---
 class ADC:
     """

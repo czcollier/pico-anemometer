@@ -17,7 +17,6 @@ class MovingAverage:
     if window_size <= 0:
       raise ValueError("Window size must be a positive integer.")
     self._size: int = window_size
-    # In Python, a list is a much better fit than a raw array.
     self._readings = array.array(
       'f', (0.0 for _ in range(window_size)))
 
@@ -26,7 +25,7 @@ class MovingAverage:
     self._window_is_full: bool = False
     self.clear()
 
-
+  @micropython.native
   def clear(self):
     """Clears the history and resets the average."""
     self._current_index = 0

@@ -134,7 +134,7 @@ def get_jwt_access_token():
     return exchange_jwt_for_access_token(jwt)
 
 
-def get_jwt_auth_headers():
+def get_jwt_auth_headers() -> dict:
   access_token = get_jwt_access_token()
   AUTH_HEADERS["authorization"] = AUTH_BEARER_FMT % access_token
   return AUTH_HEADERS
