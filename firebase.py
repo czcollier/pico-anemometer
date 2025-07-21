@@ -81,6 +81,3 @@ def get_from_firebase(auth_headers: dict | None) -> dict | None:
     finally:
         if response:
             response.close()
-# Ja\oVK:<4F2I>Lv(
-# \FHuOLDI%V&F0&N_
-# TVQkE3S.V(N,AAp7
