@@ -14,7 +14,8 @@ READING_TOLERANCE: float = const(0.05)
 SCALE_FACTOR: float = const(2.5)
 MAX_WS: int = const(100)
 # hardware maxk is 655535. Dial maxes out at around 24000
-MAX_DUTY_CYCLE: int = const(23500)
+#MAX_DUTY_CYCLE: int = const(23500)
+MAX_DUTY_CYCLE: int = const(1800)
 
 # auth
 AUTH_TOKEN_EXPIRY_MS: int = const(1000 * 3600)

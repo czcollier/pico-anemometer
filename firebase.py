@@ -15,7 +15,8 @@ FB_DATA_PATH = secrets.FIREBASE_DATA_PATH
 FB_URL_FMT: str = const("https://%s.firebaseio.com/%s")
 FB_MESSAGE = {
     "wind_speed": 0.0,
-    "timestamp": ""
+    "timestamp": "",
+    "source": "device_" + secrets.SENSOR_ID,
 }
 
 

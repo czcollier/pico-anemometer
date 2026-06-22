@@ -93,7 +93,7 @@ def main_loop() -> None:
         # --- Connect to Wi-Fi on the main core ---
         connect_to_wifi()
 
-        jwt_auth_headers = firebase.google_jwt_authenticate(NTP_FAILURE_LENIENT)
+        jwt_auth_headers = firebase.google_jwt_authenticate(ntp_failure_lenient=NTP_FAILURE_LENIENT)
 
         start_ms = time.ticks_ms()
         last_auth_refresh_time = start_ms
